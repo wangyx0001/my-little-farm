@@ -16,7 +16,7 @@ There is no build step. To preview:
 # open directly
 start "C:\Users\wangy\Claude\Projects\Farm game\index.html"
 
-# or serve it (useful for testing the "embedded in an iframe" code path)
+# or serve it over HTTP (e.g. to test on a phone on the same network)
 python -m http.server 8123
 ```
 
@@ -26,32 +26,23 @@ There are no automated tests, linter, or formatter configured for this project. 
 
 ## Deployment model — read before touching sizing/meta code
 
-This file is deployed two ways simultaneously, and both must keep working:
+This file runs as a **standalone** page: opened directly as a file, served over HTTP, or added to an iOS home screen. (It used to also support an embedded/iframe "Claude Artifact" mode; that path — the `EMBED` detection and its `resize()` branch — has been removed. Don't reintroduce iframe/host-driven sizing without restoring it deliberately.)
 
-1. **Standalone** — opened directly as a file, or added to an iOS home screen. `window.self === window.top`.
-2. **Embedded** — pasted into a Claude "Artifact" and rendered inside an iframe whose *height the host derives from this page's own content height*. `window.self !== window.top`.
+`resize()` sizes off `window.visualViewport` (which excludes the iOS Safari toolbar so the game doesn't get clipped under it — plain `window.innerHeight` does not), falling back to `window.innerWidth`/`innerHeight`.
 
-`EMBED` (near the top of the script) detects which mode is active and adds an `html.solo` class in standalone mode. `resize()` branches on `EMBED`:
-- Standalone: sizes off `window.visualViewport` (excludes the iOS Safari toolbar so the game doesn't get clipped under it — plain `window.innerHeight` does not).
-- Embedded: sizes off `document.documentElement.clientWidth`/`clientHeight` only — **never** the viewport — because reading the viewport there would feed the host's own output back in as input and the layout would never converge.
+Everything is sized through one `#stage` div whose pixel `width`/`height` JS sets explicitly (not CSS `100%`, which is wrong on iOS because of the toolbar). The `<canvas>` also needs an explicit CSS `width`/`height` set alongside its pixel `width`/`height` attributes, or the browser lays it out at the attribute size (`dpr`× too large) instead of the CSS size.
 
-Everything is sized through one `#stage` div whose pixel `width`/`height` JS sets explicitly (not CSS `100%`, which is either wrong on iOS or circular when embedded). The `<canvas>` also needs an explicit CSS `width`/`height` set alongside its pixel `width`/`height` attributes, or the browser lays it out at the attribute size (`dpr`× too large) instead of the CSS size.
+`resize()` is called directly on every resize/orientation/visualViewport event and additionally self-heals every 15 frames from the render loop (`frame()` near the bottom) — deliberately *not* coalesced through `requestAnimationFrame`, because a "resize already queued" flag would latch forever if that callback were ever throttled, freezing the game at the wrong size.
 
-`resize()` is called directly on every resize/orientation/visualViewport event and additionally self-heals every 15 frames from the render loop (`frame()` near the bottom) — deliberately *not* coalesced through `requestAnimationFrame`, because rAF is throttled in hidden/offscreen iframes and a "resize already queued" flag would latch forever if that callback never fires, freezing the game at the wrong size.
-
-If you change anything under the `resize()`/`EMBED`/`#stage` code, test at minimum: standalone in a normal browser tab, standalone with the URL bar hidden (mobile), and embedded in an iframe at a few widths — a regression here tends to only show up in one of the two deployment modes.
+If you change anything under the `resize()`/`#stage` code, test at minimum: standalone in a normal browser tab, and on mobile with the URL bar hidden — the iOS-toolbar case is where regressions here tend to show up.
 
 ## Publishing
 
-This repo has two independent, live public deployments of the same `index.html`. Changes only reach one when you push to that specific target — pick deliberately, or do both.
-
-**GitHub Pages** — `git push origin master` to `https://github.com/wangyx0001/my-little-farm` auto-deploys to `https://wangyx0001.github.io/my-little-farm/` within a minute or two, no extra steps. This is the "standalone" deployment mode (`window.self === window.top`), same code path as opening the file directly. Prefer this as the source of truth for the live public URL — it deploys straight from what's committed.
-
-**Claude Artifact** — when this file is published as a Claude Artifact for sharing, publishing a new version does **not** automatically update what public link visitors see — Claude pins a public share to a specific version, and switching that pin to "Latest" is blocked while the artifact is shared publicly ("Change who has access first"). After republishing, the shared version must be manually re-pinned to the new version in the Artifact's Share dialog, or the public link keeps serving the old build. This is the "embedded" deployment mode described above.
+The live public deployment is **GitHub Pages**: `git push origin master` to `https://github.com/wangyx0001/my-little-farm` auto-deploys to `https://wangyx0001.github.io/my-little-farm/` within a minute or two, no extra steps. This deploys straight from what's committed — it's the source of truth for the public URL.
 
 ## Code architecture
 
-Single `<script>` block, organized top-to-bottom as: helpers → resize/EMBED → Audio → constants → state → save/load → world entities → input → HUD → update loop → render loop → boot. Section banners (`/* ---------------- Name ---------------- */`) mark these; use them to navigate rather than searching for individual functions.
+Single `<script>` block, organized top-to-bottom as: helpers → resize → Audio → constants → state → save/load → world entities → input → HUD → update loop → render loop → boot. Section banners (`/* ---------------- Name ---------------- */`) mark these; use them to navigate rather than searching for individual functions.
 
 **World layout is coordinate-based, not a grid.** `MAIN`, `FOREST`, `BRIDGE`, `DOCK`, `CHICKEN_PEN`, `COW_PEN` are all `{x, y, w, h}` rects in one shared `WORLD` space (1700×1000). `isWalkable(x, y)` (via `walkableRects()`) checks whether a point falls inside one of the walkable rects — `MAIN`, `FOREST`, `DOCK`, plus `BRIDGE` only once unlocked — after shrinking each by a 20px margin. Because that margin is applied per-rect, **adjacent walkable rects must physically overlap by more than the margin or a dead band forms at the seam** (this is why `BRIDGE` and `DOCK` extend a little onto the islands they connect to). Fixed-position content (`PLOT_POS`, `TREE_POS_MAIN`, `TREE_POS_FOREST`, `BUSH_POS`, `SELL_STAND`, `SELL_ZONE`, `FISH_SPOT`) are plain coordinate constants inside those rects — there's no tilemap or spatial index. Adding a new resource node means picking coordinates by eye and adding an entry to the relevant `*_POS` array.
 

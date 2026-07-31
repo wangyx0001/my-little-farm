@@ -17,12 +17,10 @@
     font-family:"Comic Sans MS","Chalkboard SE","Segoe UI Rounded","Segoe UI",sans-serif;
     user-select:none; -webkit-user-select:none; -webkit-touch-callout:none; }
   /* Everything lives in #stage, whose pixel size JS sets explicitly. iOS Safari
-     reports a layout viewport that disappears behind its toolbars, and when this
-     page runs inside the artifact viewer its height is set by the host from our
-     own content — so any CSS height of 100% would be either wrong or circular. */
-  #stage { position:relative; overflow:hidden; touch-action:none; margin:0 auto; }
-  html.solo, html.solo body { height:100%; overflow:hidden; }
-  html.solo #stage { position:fixed; top:0; left:0; }
+     reports a layout viewport that disappears behind its toolbars, so a CSS
+     height of 100% would be wrong — JS sizes #stage off visualViewport instead. */
+  html, body { height:100%; overflow:hidden; }
+  #stage { position:fixed; top:0; left:0; overflow:hidden; touch-action:none; margin:0 auto; }
   #game { position:absolute; inset:0; display:block; }
   /* ---------- HUD ---------- */
   #hud { position:absolute; inset:0; pointer-events:none; z-index:5; }
@@ -104,32 +102,12 @@ const stage = document.getElementById('stage');
 const ctx = canvas.getContext('2d');
 let cssW = 0, cssH = 0, dpr = 1;
 
-// Embedded (artifact viewer) vs. standalone (opened as a file / home-screen app).
-// Embedded pages are iframes sized by the host from our content height, so we
-// derive our height from our WIDTH only — reading the viewport height there
-// would feed our own output back in as input.
-const EMBED = (() => { try { return window.self !== window.top; } catch (e) { return true; } })();
-if (!EMBED) document.documentElement.classList.add('solo');
-
 function resize() {
   dpr = Math.min(window.devicePixelRatio || 1, 2);
-  let w, h;
-  if (EMBED) {
-    const de = document.documentElement;
-    w = clamp(Math.round(de.clientWidth || window.innerWidth || 360), 240, 1400);
-    // Fill exactly the height the host gave us: our content then measures the
-    // same as the frame, so the host's sizing loop settles instead of growing
-    // (scrollHeight can never report less than the frame, only more).
-    const vh = Math.round(de.clientHeight || 0);
-    h = vh >= 200 ? clamp(vh, 200, 1200)
-      : (w < 520 ? Math.round(clamp(w * 1.45, 380, 640))    // phones: tall play area
-                 : Math.round(clamp(w * 0.62, 420, 640)));  // tablets and desktop
-  } else {
-    // visualViewport excludes the iOS Safari toolbars; innerHeight does not.
-    const vv = window.visualViewport;
-    w = Math.round((vv && vv.width) || window.innerWidth || 360);
-    h = Math.round((vv && vv.height) || window.innerHeight || 640);
-  }
+  // visualViewport excludes the iOS Safari toolbars; innerHeight does not.
+  const vv = window.visualViewport;
+  const w = Math.round((vv && vv.width) || window.innerWidth || 360);
+  const h = Math.round((vv && vv.height) || window.innerHeight || 640);
   if (w === cssW && h === cssH) return;
   cssW = w; cssH = h;
   stage.style.width = w + 'px';
@@ -141,9 +119,9 @@ function resize() {
   canvas.width = Math.round(w * dpr);
   canvas.height = Math.round(h * dpr);
 }
-// Called directly rather than coalesced through requestAnimationFrame: rAF is
-// throttled in hidden/offscreen iframes, and a "already queued" flag would latch
-// on forever if its callback never ran, freezing the game at the wrong size.
+// Called directly rather than coalesced through requestAnimationFrame: resize()
+// is cheap (it early-returns when nothing moved), and this avoids a queued-flag
+// that could latch on and freeze the game at the wrong size if rAF is throttled.
 function queueResize() { resize(); }
 window.addEventListener('resize', queueResize);
 window.addEventListener('orientationchange', queueResize);
