@@ -473,7 +473,7 @@ function update(dt) {
     const c = cat;
     const tx = P.x - (P.flip ? -30 : 30), ty = P.y + 14;
     const dx = tx - c.x, dy = ty - c.y, d = Math.hypot(dx, dy);
-    if (d > 320) { c.x = tx; c.y = ty; }   // catch up if left far behind (e.g. across the bridge)
+    if (d > 320) { const ok = isWalkable(tx, ty); c.x = ok ? tx : P.x; c.y = ok ? ty : P.y; }   // catch up if left far behind (e.g. across the bridge) — never onto water
     else if (d > 8) {
       const spd = clamp(d * 3.2, 0, speed() * 1.5);
       const nx = c.x + dx / d * spd * dt, ny = c.y + dy / d * spd * dt;
