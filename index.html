@@ -43,6 +43,36 @@
     pointer-events:auto; width:44px; height:44px; border-radius:50%; border:none; font-size:20px;
     background:rgba(255,255,255,0.92); box-shadow:0 3px 0 rgba(0,0,0,0.12); cursor:pointer; }
   #muteBtn:active { transform:scale(0.92); }
+  #shopBtn { position:absolute; top:calc(106px + env(safe-area-inset-top)); left:calc(10px + env(safe-area-inset-left));
+    pointer-events:auto; width:44px; height:44px; border-radius:50%; border:none; font-size:20px;
+    background:rgba(255,255,255,0.92); box-shadow:0 3px 0 rgba(0,0,0,0.12); cursor:pointer; }
+  #shopBtn:active { transform:scale(0.92); }
+  /* ---------- Dress-up shop ---------- */
+  #shopOverlay { position:absolute; inset:0; z-index:11; display:flex; align-items:center; justify-content:center;
+    background:rgba(40,60,90,0.45); backdrop-filter:blur(3px); transition:opacity 0.25s ease; padding:20px; }
+  #shopOverlay.hidden { opacity:0; pointer-events:none; }
+  .shopPanel { position:relative; background:linear-gradient(180deg,#fffbe8,#ffeeba); border-radius:26px;
+    padding:22px 22px 26px; box-shadow:0 10px 0 rgba(0,0,0,0.15), 0 20px 60px rgba(0,0,0,0.25);
+    max-width:360px; width:100%; border:4px solid #fff; text-align:center; }
+  .shopPanel h2 { color:#7a4a1e; font-size:23px; margin-bottom:4px; }
+  .shopPanel h3 { color:#9a6b35; font-size:16px; margin:14px 0 8px; text-align:left; }
+  .shopCoins { display:inline-flex; align-items:center; gap:6px; font-weight:bold; color:#6b4a1e; font-size:19px; }
+  .shopCoins .coinIcon { width:20px; height:20px; border-radius:50%;
+    background:radial-gradient(circle at 35% 30%, #ffe98a, #ffc93c 55%, #e8a417); border:2px solid #d68f10; }
+  .swatchRow { display:flex; flex-wrap:wrap; gap:10px; justify-content:flex-start; }
+  .swatch { position:relative; width:52px; height:52px; border-radius:50%; border:3px solid #fff; cursor:pointer;
+    box-shadow:0 3px 0 rgba(0,0,0,0.14); padding:0; }
+  .swatch:active { transform:scale(0.93); }
+  .swatch.equipped { border-color:#4caf2a; box-shadow:0 0 0 3px #8ed04d, 0 3px 0 rgba(0,0,0,0.14); }
+  .swatch .chk { position:absolute; inset:0; display:flex; align-items:center; justify-content:center;
+    color:#fff; font-size:22px; text-shadow:0 1px 2px rgba(0,0,0,0.4); }
+  .swatch .price { position:absolute; bottom:-9px; left:50%; transform:translateX(-50%);
+    background:#fffbe8; border:2px solid #ffc93c; border-radius:10px; font-size:11px; font-weight:bold;
+    color:#6b4a1e; padding:0 5px; white-space:nowrap; }
+  .swatch.locked { filter:saturate(0.5) brightness(0.9); }
+  #shopClose { position:absolute; top:10px; right:12px; width:34px; height:34px; border-radius:50%; border:none;
+    background:#f0663d; color:#fff; font-size:16px; font-weight:bold; cursor:pointer; box-shadow:0 3px 0 #c34a25; }
+  #shopClose:active { transform:translateY(2px); box-shadow:0 1px 0 #c34a25; }
   /* ---------- Name overlay ---------- */
   #nameOverlay { position:absolute; inset:0; z-index:10; display:flex; align-items:center; justify-content:center;
     background:linear-gradient(180deg, rgba(87,199,240,0.75), rgba(58,169,224,0.85)); backdrop-filter:blur(3px);
@@ -69,6 +99,7 @@
   <div id="hud">
     <div id="titlePill" class="pill">🌻 <span id="farmName">My Little Farm</span></div>
     <button id="muteBtn">🔊</button>
+    <button id="shopBtn">🎨</button>
     <div id="rightHud">
       <div id="coinPill" class="pill"><span class="coinIcon"></span><span id="coinCount">0</span></div>
       <div id="bagPill" class="pill">🧺 <span id="bagCount">0/8</span></div>
@@ -81,6 +112,17 @@
       <p>What's your name, farmer?</p>
       <input id="nameInput" maxlength="14" placeholder="Your name" autocomplete="off">
       <button id="startBtn">Let's farm! 🌻</button>
+    </div>
+  </div>
+  <div id="shopOverlay" class="hidden">
+    <div class="shopPanel">
+      <button id="shopClose" aria-label="Close">✕</button>
+      <h2>🎨 Dress Up!</h2>
+      <div class="shopCoins"><span class="coinIcon"></span><span id="shopCoinCount">0</span></div>
+      <h3>👧 Farmer's dress</h3>
+      <div class="swatchRow" id="dressRow"></div>
+      <h3>🐱 Kitty's fur</h3>
+      <div class="swatchRow" id="catRow"></div>
     </div>
   </div>
 </div>
@@ -192,12 +234,17 @@ const AU = {
   moo()    { this.tone({ f: 180, f2: 140, type: 'sawtooth', dur: 0.4, vol: 0.04 }); },
   cluck()  { this.tone({ f: 520, f2: 380, type: 'square', dur: 0.06, vol: 0.03 }); },
   meow()   { this.tone({ f: 660, f2: 900, type: 'sine', dur: 0.12, vol: 0.05 }); this.tone({ f: 880, f2: 540, type: 'sine', dur: 0.2, vol: 0.05, delay: 0.1 }); },
+  baa()    { this.tone({ f: 340, f2: 250, type: 'sawtooth', dur: 0.32, vol: 0.04 }); this.tone({ f: 300, f2: 330, type: 'sawtooth', dur: 0.16, vol: 0.03, delay: 0.16 }); },
   splash() { this.noise({ dur: 0.18, vol: 0.12, f: 900 }); this.tone({ f: 520, f2: 920, type: 'sine', dur: 0.12, vol: 0.04 }); },
   fanfare(){ [523, 659, 784, 1047].forEach((f, i) => { this.tone({ f, type: 'triangle', dur: 0.24, vol: 0.15, delay: i * 0.1 }); this.tone({ f: f * 2, type: 'sine', dur: 0.2, vol: 0.05, delay: i * 0.1 }); }); },
 };
 
 /* ---------------- Game data / constants ---------------- */
-const PRICES = { wood: 2, wheat: 3, berry: 4, egg: 5, milk: 12, fish: 8 };
+const PRICES = { wood: 2, wheat: 3, berry: 4, egg: 5, fish: 7, wool: 9, milk: 10 };
+// cosmetic palettes (index 0 = default, owned free)
+const DRESS_COLORS = ['#e8618c', '#4d96ff', '#5cae2a', '#a760d8', '#e0413e', '#20c4b0'];
+const CAT_COLORS   = ['#eaa64c', '#9aa3ad', '#4a4a4a', '#efe7d8', '#8a5a34'];
+const DRESS_COST = 150, CAT_COST = 200;
 const WORLD = { w: 1700, h: 1000 };
 const DAY_LEN = 190;   // seconds for one full day → night → day cycle
 const MAIN   = { x: 80,  y: 140, w: 680, h: 720 };
@@ -214,6 +261,9 @@ const TREE_POS_FOREST = [ { x: 1060, y: 300 }, { x: 1215, y: 245 }, { x: 1365, y
 const BUSH_POS = [ { x: 1255, y: 470 }, { x: 1400, y: 545 } ];
 const DOCK      = { x: 176, y: 800, w: 96, h: 172 };   // fishing pier off the main island's south shore
 const FISH_SPOT = { x: 224, y: 930 };                  // stand here (dock end) to fish
+const SHEEP_PEN  = { x: 1408, y: 205, w: 192, h: 168 };            // unlocked with the 'sheep' upgrade
+const BERRY3_POS = [ { x: 1010, y: 615 }, { x: 1035, y: 690 } ];   // extra bushes from the 'berry3' upgrade
+const FOUNTAIN   = { x: 1150, y: 410 };                            // decorative centerpiece from the 'fountain' upgrade
 
 const ZONES = [
   { id: 'plot3',  x: 455,  y: 690, r: 42, cost: 15,  label: 'New Field!',    icon: 'wheat',   vis: u => true },
@@ -224,19 +274,28 @@ const ZONES = [
   { id: 'pack2',  x: 1500, y: 380, r: 40, cost: 150, label: 'Huge Basket!',  icon: 'basket',  vis: u => u.bridge },
   { id: 'cowpen', x: 1230, y: 695, r: 44, cost: 200, label: 'Cow Pen!',      icon: 'cow',     vis: u => u.bridge },
   { id: 'chick4', x: 445,  y: 300, r: 40, cost: 250, label: 'New Chicken!',  icon: 'chicken', vis: u => u.chick3 },
-  { id: 'gold',   x: 1500, y: 600, r: 40, cost: 300, label: 'Golden Tools!', icon: 'axe',     vis: u => u.bridge },
+  { id: 'gold',   x: 1500, y: 600, r: 40, cost: 300,  label: 'Golden Tools!', icon: 'axe',     vis: u => u.bridge },
+  // ---- second tier: bigger goals so coins always have somewhere to go ----
+  { id: 'berry3',  x: 1010, y: 615, r: 42, cost: 250,  label: 'Berry Patch!',   icon: 'berry',    vis: u => u.bridge },
+  { id: 'boots2',  x: 250,  y: 720, r: 40, cost: 400,  label: 'Super Boots!',   icon: 'boots',    vis: u => u.boots },
+  { id: 'sheep',   x: 1500, y: 250, r: 44, cost: 550,  label: 'Sheep Pen!',     icon: 'sheep',    vis: u => u.bridge },
+  { id: 'pack3',   x: 600,  y: 655, r: 40, cost: 700,  label: 'Mega Basket!',   icon: 'basket',   vis: u => u.pack2 },
+  { id: 'diamond', x: 1565, y: 460, r: 40, cost: 1000, label: 'Diamond Tools!', icon: 'diamond',  vis: u => u.gold },
+  { id: 'fountain',x: 1150, y: 410, r: 46, cost: 2500, label: 'Grand Fountain!',icon: 'fountain', vis: u => u.bridge },
 ];
 
 /* ---------------- State ---------------- */
 const S = {
   name: '', coins: 0, carried: [],
-  un: { plot3: 0, chick3: 0, pack1: 0, boots: 0, bridge: 0, pack2: 0, cowpen: 0, chick4: 0, gold: 0 },
+  un: { plot3: 0, chick3: 0, pack1: 0, boots: 0, bridge: 0, pack2: 0, cowpen: 0, chick4: 0, gold: 0,
+        berry3: 0, boots2: 0, sheep: 0, pack3: 0, diamond: 0, fountain: 0 },
+  cos: { dress: 0, cat: 0, ownDress: [0], ownCat: [0] },
   paid: {}, soldOnce: false,
   player: { x: 420, y: 540, vx: 0, vy: 0, flip: false, walkPhase: 0, moving: false,
             chopping: false, chopT: 0, blink: 0, lean: 0 },
 };
-const cap   = () => 8 + (S.un.pack1 ? 6 : 0) + (S.un.pack2 ? 8 : 0);
-const speed = () => 150 + (S.un.boots ? 45 : 0);
+const cap   = () => 8 + (S.un.pack1 ? 6 : 0) + (S.un.pack2 ? 8 : 0) + (S.un.pack3 ? 10 : 0);
+const speed = () => 150 + (S.un.boots ? 45 : 0) + (S.un.boots2 ? 35 : 0);
 let started = false, dirty = false, reserved = 0;
 
 /* ---------------- Save / load ---------------- */
@@ -246,7 +305,7 @@ function save() {
   try {
     localStorage.setItem(SAVE_KEY, JSON.stringify({
       v: 1, name: S.name, coins: S.coins, muted: AU.muted,
-      carried: S.carried, un: S.un, paid: S.paid, soldOnce: S.soldOnce,
+      carried: S.carried, un: S.un, paid: S.paid, soldOnce: S.soldOnce, cos: S.cos,
     }));
   } catch (e) {}
   dirty = false;
@@ -260,12 +319,21 @@ function load() {
     S.name = d.name || 'Farmer'; S.coins = d.coins || 0; AU.muted = !!d.muted;
     S.carried = Array.isArray(d.carried) ? d.carried.slice(0, 40) : [];
     Object.assign(S.un, d.un || {}); S.paid = d.paid || {}; S.soldOnce = !!d.soldOnce;
+    if (d.cos) {
+      S.cos.dress = d.cos.dress | 0; S.cos.cat = d.cos.cat | 0;
+      if (Array.isArray(d.cos.ownDress) && d.cos.ownDress.length) S.cos.ownDress = d.cos.ownDress;
+      if (Array.isArray(d.cos.ownCat) && d.cos.ownCat.length) S.cos.ownCat = d.cos.ownCat;
+      if (!S.cos.ownDress.includes(0)) S.cos.ownDress.push(0);
+      if (!S.cos.ownCat.includes(0)) S.cos.ownCat.push(0);
+      if (!S.cos.ownDress.includes(S.cos.dress)) S.cos.dress = 0;
+      if (!S.cos.ownCat.includes(S.cos.cat)) S.cos.cat = 0;
+    }
     return true;
   } catch (e) { return false; }
 }
 
 /* ---------------- World entities ---------------- */
-const trees = [], plots = [], bushes = [], chickens = [], cows = [];
+const trees = [], plots = [], bushes = [], chickens = [], cows = [], sheeps = [];
 const drops = [], flyers = [], floaters = [], parts = [], coinParts = [];
 let ambientChirpT = rand(4, 9), fullHintT = 0, saveT = 0;
 let dayT = 0.15;   // time of day, 0..1 (starts mid-morning); cosmetic only
@@ -290,15 +358,22 @@ function addCow() {
   cows.push({ x: rand(p.x + 45, p.x + p.w - 45), y: rand(p.y + 55, p.y + p.h - 35),
     tx: 0, ty: 0, moveT: 0, milkT: rand(10, 18), flip: false, spawnT: 0 });
 }
+function addSheep() {
+  const p = SHEEP_PEN;
+  sheeps.push({ x: rand(p.x + 40, p.x + p.w - 40), y: rand(p.y + 50, p.y + p.h - 30),
+    tx: 0, ty: 0, moveT: 0, woolT: rand(12, 20), flip: false, spawnT: 0 });
+}
 function buildWorld() {
   TREE_POS_MAIN.forEach(addTree); TREE_POS_FOREST.forEach(addTree);
   addPlot(PLOT_POS[0]); addPlot(PLOT_POS[1]);
   if (S.un.plot3) addPlot(PLOT_POS[2]);
   BUSH_POS.forEach(addBush);
+  if (S.un.berry3) BERRY3_POS.forEach(addBush);
   addChicken(); addChicken();
   if (S.un.chick3) addChicken();
   if (S.un.chick4) addChicken();
   if (S.un.cowpen) { addCow(); addCow(); }
+  if (S.un.sheep) { addSheep(); addSheep(); }
 }
 
 function walkableRects() {
@@ -413,6 +488,47 @@ elMute.addEventListener('click', () => {
   dirty = true; save();
 });
 
+/* ---------------- Dress-up shop ---------------- */
+const shopOverlay = document.getElementById('shopOverlay');
+const shopBtn = document.getElementById('shopBtn');
+const shopClose = document.getElementById('shopClose');
+function renderSwatchRow(rowEl, colors, cost, kind) {
+  const own = kind === 'dress' ? S.cos.ownDress : S.cos.ownCat;
+  const cur = kind === 'dress' ? S.cos.dress : S.cos.cat;
+  rowEl.innerHTML = '';
+  colors.forEach((col, i) => {
+    const owned = own.includes(i);
+    const sw = document.createElement('button');
+    sw.className = 'swatch' + (cur === i ? ' equipped' : '') + (owned ? '' : ' locked');
+    sw.style.background = col;
+    if (cur === i) { const chk = document.createElement('span'); chk.className = 'chk'; chk.textContent = '✓'; sw.appendChild(chk); }
+    else if (!owned) { const tag = document.createElement('span'); tag.className = 'price'; tag.textContent = cost; sw.appendChild(tag); }
+    sw.addEventListener('click', () => {
+      AU.init();
+      if (owned) {
+        if (kind === 'dress') S.cos.dress = i; else S.cos.cat = i;
+        AU.pop(1.15);
+      } else if (S.coins >= cost) {
+        S.coins -= cost; own.push(i);
+        if (kind === 'dress') S.cos.dress = i; else S.cos.cat = i;
+        AU.coin(); bumpCoins();
+      } else { AU.thud(); return; }
+      dirty = true; save(); refreshHud(); buildShop();
+    });
+    rowEl.appendChild(sw);
+  });
+}
+function buildShop() {
+  document.getElementById('shopCoinCount').textContent = S.coins;
+  renderSwatchRow(document.getElementById('dressRow'), DRESS_COLORS, DRESS_COST, 'dress');
+  renderSwatchRow(document.getElementById('catRow'), CAT_COLORS, CAT_COST, 'cat');
+}
+function openShop() { AU.init(); buildShop(); shopOverlay.classList.remove('hidden'); }
+function closeShop() { shopOverlay.classList.add('hidden'); }
+shopBtn.addEventListener('click', openShop);
+shopClose.addEventListener('click', closeShop);
+shopOverlay.addEventListener('click', e => { if (e.target === shopOverlay) closeShop(); });
+
 /* ---------------- Helpers: fx ---------------- */
 function floater(x, y, txt, col, size) {
   floaters.push({ x, y, txt, col: col || '#ffffff', size: size || 20, t: 0 });
@@ -510,7 +626,7 @@ function update(dt) {
       P.chopping = true;
       if (!P.moving) P.flip = tgt.x < P.x;
       P.chopT += dt;
-      const CHOP = S.un.gold ? 0.38 : 0.62;
+      const CHOP = S.un.diamond ? 0.28 : S.un.gold ? 0.38 : 0.62;
       if (P.chopT >= CHOP) {
         P.chopT = 0;
         tgt.hp--; tgt.wob = 1;
@@ -527,7 +643,7 @@ function update(dt) {
     if (pl.spawnT > 0 && pl.spawnT < 0.5) pl.spawnT += dt;
     if (pl.growth < 1) pl.growth = Math.min(1, pl.growth + dt / 11);
     else if (started && Math.abs(P.x - pl.x) < PLOT_SIZE.w / 2 + 8 && Math.abs(P.y - pl.y) < PLOT_SIZE.h / 2 + 10) {
-      const want = 3 + (S.un.gold ? 1 : 0);
+      const want = 3 + (S.un.gold ? 1 : 0) + (S.un.diamond ? 1 : 0);
       const n = Math.min(want, freeSlots());
       if (n <= 0) { fullHint(); continue; }
       pl.growth = 0;
@@ -544,7 +660,7 @@ function update(dt) {
     if (b.spawnT > 0 && b.spawnT < 0.5) b.spawnT += dt;
     if (b.growth < 1) b.growth = Math.min(1, b.growth + dt / 14);
     else if (started && dist(P.x, P.y, b.x, b.y) < 46) {
-      const want = 2 + (S.un.gold ? 1 : 0);
+      const want = 2 + (S.un.gold ? 1 : 0) + (S.un.diamond ? 1 : 0);
       const n = Math.min(want, freeSlots());
       if (n <= 0) { fullHint(); continue; }
       b.growth = 0;
@@ -600,6 +716,28 @@ function update(dt) {
       if (milkOnGround < 3) {
         drops.push({ type: 'milk', x: c.x + rand(-10, 10), y: c.y + 12, bob: Math.random() * TAU, taken: false });
         AU.moo();
+      }
+    }
+  }
+
+  /* --- sheep --- */
+  const woolOnGround = drops.filter(d => d.type === 'wool').length;
+  for (const s of sheeps) {
+    if (s.spawnT > 0 && s.spawnT < 0.5) s.spawnT += dt;
+    s.moveT -= dt;
+    if (s.moveT <= 0) {
+      s.moveT = rand(2.5, 6);
+      s.tx = rand(SHEEP_PEN.x + 40, SHEEP_PEN.x + SHEEP_PEN.w - 40);
+      s.ty = rand(SHEEP_PEN.y + 50, SHEEP_PEN.y + SHEEP_PEN.h - 30);
+    }
+    const dx = s.tx - s.x, dy = s.ty - s.y, d = Math.hypot(dx, dy);
+    if (d > 5) { s.x += dx / d * 20 * dt; s.y += dy / d * 20 * dt; s.flip = dx < 0; }
+    s.woolT -= dt;
+    if (s.woolT <= 0) {
+      s.woolT = rand(16, 24);
+      if (woolOnGround < 3) {
+        drops.push({ type: 'wool', x: s.x + rand(-10, 10), y: s.y + 12, bob: Math.random() * TAU, taken: false });
+        AU.baa();
       }
     }
   }
@@ -742,9 +880,13 @@ function unlock(z) {
   if (z.id === 'plot3') addPlot(PLOT_POS[2]), plots[plots.length - 1].spawnT = 0.001, plots[plots.length - 1].growth = 0.6;
   if (z.id === 'chick3' || z.id === 'chick4') { addChicken(); chickens[chickens.length - 1].spawnT = 0.001; }
   if (z.id === 'cowpen') { addCow(); addCow(); cows.forEach(c => { if (!c.spawnT) c.spawnT = 0.001; }); }
-  if (z.id === 'pack1' || z.id === 'pack2') floater(S.player.x, S.player.y - 78, 'You can carry more! 🧺', '#ffe08a', 19);
-  if (z.id === 'boots') floater(S.player.x, S.player.y - 78, 'Zoom zoom! 👢', '#ffe08a', 19);
+  if (z.id === 'pack1' || z.id === 'pack2' || z.id === 'pack3') floater(S.player.x, S.player.y - 78, 'You can carry more! 🧺', '#ffe08a', 19);
+  if (z.id === 'boots' || z.id === 'boots2') floater(S.player.x, S.player.y - 78, 'Zoom zoom! 👢', '#ffe08a', 19);
   if (z.id === 'gold') floater(S.player.x, S.player.y - 78, 'Shiny golden tools! ✨', '#ffe08a', 19);
+  if (z.id === 'berry3') BERRY3_POS.forEach(p => { addBush(p); bushes[bushes.length - 1].spawnT = 0.001; });
+  if (z.id === 'sheep') { addSheep(); addSheep(); sheeps.forEach(s => { if (!s.spawnT) s.spawnT = 0.001; }); }
+  if (z.id === 'diamond') floater(S.player.x, S.player.y - 78, 'Sparkly diamond tools! 💎', '#ffe08a', 19);
+  if (z.id === 'fountain') floater(FOUNTAIN.x, FOUNTAIN.y - 60, 'A beautiful fountain! ⛲', '#ffe08a', 20);
   save();
 }
 
@@ -835,6 +977,11 @@ function drawItem(type, x, y, s, rot) {
     ctx.beginPath(); ctx.ellipse(-2, 2.4, 5, 2, 0, 0, TAU); ctx.fillStyle = '#bfe9f5'; ctx.fill();
     ctx.beginPath(); ctx.arc(-5, -1.4, 1.5, 0, TAU); ctx.fillStyle = '#fff'; ctx.fill();
     ctx.beginPath(); ctx.arc(-5, -1.4, 0.8, 0, TAU); ctx.fillStyle = '#22333a'; ctx.fill();
+  } else if (type === 'wool') {
+    ctx.fillStyle = '#f4f1e8';
+    ctx.beginPath(); ctx.arc(-4, 0, 5, 0, TAU); ctx.arc(4, 0, 5, 0, TAU); ctx.arc(0, -4, 5, 0, TAU); ctx.arc(0, 3, 4.5, 0, TAU); ctx.fill();
+    ctx.fillStyle = '#e2ddcd';
+    ctx.beginPath(); ctx.arc(-2, 1, 1.4, 0, TAU); ctx.arc(3, -1, 1.2, 0, TAU); ctx.fill();
   }
   ctx.restore();
 }
@@ -876,6 +1023,26 @@ function drawIcon(kind, x, y, s) {
     ctx.fillStyle = '#f2c94c'; ctx.fill();
     ctx.strokeStyle = '#d8a929'; ctx.lineWidth = 1.4; ctx.stroke();
     ctx.restore();
+  } else if (kind === 'berry') {
+    drawItem('berry', 0, 0, 1.7);
+  } else if (kind === 'sheep') {
+    ctx.fillStyle = '#f4f1e8';
+    ctx.beginPath(); ctx.arc(-5, 1, 7, 0, TAU); ctx.arc(6, 1, 7, 0, TAU); ctx.arc(0, -6, 8, 0, TAU); ctx.fill();
+    ctx.fillStyle = '#4a3b30'; ctx.beginPath(); ctx.ellipse(0, 3, 5, 6, 0, 0, TAU); ctx.fill();
+    ctx.fillStyle = '#fff'; ctx.beginPath(); ctx.arc(-2, 2, 1.3, 0, TAU); ctx.arc(2, 2, 1.3, 0, TAU); ctx.fill();
+    ctx.fillStyle = '#222'; ctx.beginPath(); ctx.arc(-2, 2, 0.7, 0, TAU); ctx.arc(2, 2, 0.7, 0, TAU); ctx.fill();
+  } else if (kind === 'diamond') {
+    ctx.beginPath(); ctx.moveTo(0, -11); ctx.lineTo(10, -2); ctx.lineTo(0, 12); ctx.lineTo(-10, -2); ctx.closePath();
+    ctx.fillStyle = '#6fe0e8'; ctx.fill();
+    ctx.strokeStyle = '#39b5c4'; ctx.lineWidth = 1.4; ctx.stroke();
+    ctx.strokeStyle = 'rgba(255,255,255,0.85)'; ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.moveTo(-10, -2); ctx.lineTo(10, -2); ctx.moveTo(0, -11); ctx.lineTo(0, 12); ctx.stroke();
+  } else if (kind === 'fountain') {
+    ctx.fillStyle = '#cfc8ba'; ctx.beginPath(); ctx.ellipse(0, 7, 12, 5, 0, 0, TAU); ctx.fill();
+    ctx.fillStyle = '#7fb7e0'; ctx.beginPath(); ctx.ellipse(0, 6, 9, 3.5, 0, 0, TAU); ctx.fill();
+    ctx.strokeStyle = '#bfe6f5'; ctx.lineWidth = 2; ctx.lineCap = 'round';
+    ctx.beginPath(); ctx.moveTo(0, 4); ctx.lineTo(0, -8); ctx.stroke();
+    ctx.fillStyle = '#bfe6f5'; ctx.beginPath(); ctx.arc(0, -9, 2, 0, TAU); ctx.fill();
   }
   ctx.restore();
 }
@@ -1040,11 +1207,60 @@ function drawCow(c) {
   ctx.restore();
   ctx.restore();
 }
+function drawSheep(s) {
+  const grow = s.spawnT > 0 && s.spawnT < 0.5 ? s.spawnT / 0.5 : 1;
+  shadow(s.x, s.y + 14, 24 * grow, 7 * grow);
+  ctx.save(); ctx.translate(s.x, s.y); ctx.scale(s.flip ? -grow : grow, grow);
+  // legs
+  ctx.fillStyle = '#5a4632';
+  rr(-14, 10, 5, 9, 2); ctx.fill(); rr(9, 10, 5, 9, 2); ctx.fill();
+  rr(-6, 11, 5, 9, 2); ctx.fill(); rr(2, 11, 5, 9, 2); ctx.fill();
+  // fluffy body
+  ctx.fillStyle = '#f4f1e8';
+  ctx.beginPath();
+  ctx.arc(-16, -2, 11, 0, TAU); ctx.arc(-4, -8, 13, 0, TAU); ctx.arc(10, -4, 12, 0, TAU);
+  ctx.arc(2, 4, 12, 0, TAU); ctx.arc(-10, 4, 10, 0, TAU); ctx.fill();
+  // head
+  ctx.save(); ctx.translate(20, -6);
+  ctx.beginPath(); ctx.ellipse(0, 0, 7, 8, 0, 0, TAU); ctx.fillStyle = '#4a3b30'; ctx.fill();
+  ctx.beginPath(); ctx.ellipse(-7, -2, 3.5, 2, 0.6, 0, TAU); ctx.fill();
+  ctx.beginPath(); ctx.ellipse(7, -2, 3.5, 2, -0.6, 0, TAU); ctx.fill();
+  ctx.fillStyle = '#f4f1e8'; ctx.beginPath(); ctx.arc(0, -7, 5, 0, TAU); ctx.fill();
+  ctx.fillStyle = '#fff'; ctx.beginPath(); ctx.arc(-2.6, 0, 1.5, 0, TAU); ctx.arc(2.6, 0, 1.5, 0, TAU); ctx.fill();
+  ctx.fillStyle = '#222'; ctx.beginPath(); ctx.arc(-2.6, 0, 0.8, 0, TAU); ctx.arc(2.6, 0, 0.8, 0, TAU); ctx.fill();
+  ctx.restore();
+  ctx.restore();
+}
+function drawFountain() {
+  const x = FOUNTAIN.x, y = FOUNTAIN.y;
+  shadow(x, y + 18, 46, 14);
+  ctx.save(); ctx.translate(x, y);
+  // lower basin
+  ctx.fillStyle = '#cfc8ba'; ctx.beginPath(); ctx.ellipse(0, 10, 44, 18, 0, 0, TAU); ctx.fill();
+  ctx.fillStyle = '#7fb7e0'; ctx.beginPath(); ctx.ellipse(0, 8, 37, 13, 0, 0, TAU); ctx.fill();
+  ctx.strokeStyle = '#9a927f'; ctx.lineWidth = 3;
+  ctx.beginPath(); ctx.ellipse(0, 10, 44, 18, 0, 0, TAU); ctx.stroke();
+  // pedestal + upper bowl
+  ctx.fillStyle = '#c7c0b2'; rr(-10, -18, 20, 26, 5); ctx.fill();
+  ctx.fillStyle = '#cfc8ba'; ctx.beginPath(); ctx.ellipse(0, -20, 20, 8, 0, 0, TAU); ctx.fill();
+  ctx.fillStyle = '#7fb7e0'; ctx.beginPath(); ctx.ellipse(0, -21, 15, 5, 0, 0, TAU); ctx.fill();
+  // water jet + falling droplets
+  ctx.strokeStyle = 'rgba(190,230,250,0.9)'; ctx.lineWidth = 3; ctx.lineCap = 'round';
+  ctx.beginPath(); ctx.moveTo(0, -24); ctx.lineTo(0, -40); ctx.stroke();
+  for (let i = 0; i < 6; i++) {
+    const ph = (time * 1.5 + i / 6) % 1, a = i / 6 * TAU;
+    ctx.globalAlpha = 1 - ph; ctx.fillStyle = '#bfe6f5';
+    ctx.beginPath(); ctx.arc(Math.cos(a) * ph * 20, -40 + ph * ph * 40, 2.2, 0, TAU); ctx.fill();
+  }
+  ctx.globalAlpha = 1;
+  ctx.restore();
+}
 function drawCat(c) {
   const bob = c.moving ? Math.abs(Math.sin(c.walkPhase)) * 2.5 : 0;
   const y = c.y - bob;
   shadow(c.x, c.y + 6, 11, 4);
-  const base = '#eaa64c', dark = '#d98a2e', belly = '#f7ddb0';
+  const base = CAT_COLORS[S.cos.cat] || CAT_COLORS[0];
+  const dark = mixHex(base, '#000000', 0.24), belly = mixHex(base, '#ffffff', 0.55);
   ctx.save(); ctx.translate(c.x, y); ctx.scale(c.flip ? -1 : 1, 1);
   // tail (sways)
   ctx.save(); ctx.translate(-11, -6); ctx.rotate(-0.5 + Math.sin(c.tail) * 0.5);
@@ -1201,7 +1417,7 @@ function fencePieces(pen, gate) {
   return pieces;
 }
 const chickenFence = fencePieces(CHICKEN_PEN, { side: 'bottom', at: CHICKEN_PEN.x + CHICKEN_PEN.w / 2, w: 84 });
-let cowFence = [];
+let cowFence = [], sheepFence = [];
 
 function drawPlayer() {
   const P = S.player;
@@ -1243,7 +1459,7 @@ function drawPlayer() {
   ctx.quadraticCurveTo(0, -6, -12, -11);
   ctx.quadraticCurveTo(-13, -18, -8, -34);
   ctx.closePath();
-  ctx.fillStyle = '#e8618c'; ctx.fill();
+  ctx.fillStyle = DRESS_COLORS[S.cos.dress] || DRESS_COLORS[0]; ctx.fill();
   // apron
   ctx.beginPath();
   ctx.moveTo(-5, -26); ctx.lineTo(5, -26);
@@ -1269,7 +1485,7 @@ function drawPlayer() {
     // axe in hand
     ctx.save(); ctx.translate(0, 13); ctx.rotate(-0.4);
     rr(-2, -2, 4, 20, 2); ctx.fillStyle = '#a5692f'; ctx.fill();
-    const axeCol = S.un.gold ? '#f2c94c' : '#b8c4cc';
+    const axeCol = S.un.diamond ? '#8fe6ee' : S.un.gold ? '#f2c94c' : '#b8c4cc';
     ctx.beginPath(); ctx.moveTo(-2, 16); ctx.quadraticCurveTo(-14, 13, -12, 24);
     ctx.quadraticCurveTo(-6, 22, 2, 21); ctx.closePath();
     ctx.fillStyle = axeCol; ctx.fill();
@@ -1621,10 +1837,13 @@ function render() {
   for (const b of bushes) drawables.push({ y: b.y, draw: () => drawBush(b) });
   for (const c of chickens) drawables.push({ y: c.y + 10, draw: () => drawChicken(c) });
   for (const c of cows) drawables.push({ y: c.y + 16, draw: () => drawCow(c) });
+  for (const s of sheeps) drawables.push({ y: s.y + 14, draw: () => drawSheep(s) });
   for (const d of drops) drawables.push({ y: d.y, draw: () => drawDrop(d) });
   drawables.push({ y: SELL_STAND.y + 8, draw: drawStand });
+  if (S.un.fountain) drawables.push({ y: FOUNTAIN.y + 16, draw: drawFountain });
   for (const f of chickenFence) drawables.push(f);
   if (S.un.cowpen) { if (!cowFence.length) cowFence = fencePieces(COW_PEN, { side: 'top', at: COW_PEN.x + COW_PEN.w / 2, w: 84 }); for (const f of cowFence) drawables.push(f); }
+  if (S.un.sheep) { if (!sheepFence.length) sheepFence = fencePieces(SHEEP_PEN, { side: 'bottom', at: SHEEP_PEN.x + SHEEP_PEN.w / 2, w: 80 }); for (const f of sheepFence) drawables.push(f); }
   drawables.push({ y: S.player.y, draw: drawPlayer });
   drawables.push({ y: cat.y, draw: () => drawCat(cat) });
   drawables.sort((a, b) => a.y - b.y);
