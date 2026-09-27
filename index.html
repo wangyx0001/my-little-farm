@@ -264,6 +264,12 @@ const FISH_SPOT = { x: 224, y: 930 };                  // stand here (dock end) 
 const SHEEP_PEN  = { x: 1408, y: 205, w: 192, h: 168 };            // unlocked with the 'sheep' upgrade
 const BERRY3_POS = [ { x: 1010, y: 615 }, { x: 1035, y: 690 } ];   // extra bushes from the 'berry3' upgrade
 const FOUNTAIN   = { x: 1150, y: 410 };                            // decorative centerpiece from the 'fountain' upgrade
+// Market (Township-style): sold items wait on the counter, customers queue up and
+// buy them, and their cash piles up on the money tile until the player collects it.
+const CASH_ZONE = { x: 468, y: 812, r: 40 };
+const QUEUE_POS = [ { x: 670, y: 760 }, { x: 694, y: 720 }, { x: 716, y: 682 }, { x: 734, y: 646 } ];   // [0] = front, at the counter
+const CUSTOMER_GATE = { x: 736, y: 606 };   // signpost where customers arrive from / walk home to
+const ITEM_ORDER = ['wheat', 'wood', 'berry', 'egg', 'fish', 'wool', 'milk'];
 
 const ZONES = [
   { id: 'plot3',  x: 455,  y: 690, r: 42, cost: 15,  label: 'New Field!',    icon: 'wheat',   vis: u => true },
@@ -291,6 +297,8 @@ const S = {
         berry3: 0, boots2: 0, sheep: 0, pack3: 0, diamond: 0, fountain: 0 },
   cos: { dress: 0, cat: 0, ownDress: [0], ownCat: [0] },
   paid: {}, soldOnce: false,
+  counter: {},          // { itemType: count } waiting on the market counter
+  pile: 0, cashOnce: false,   // uncollected cash on the money tile; first-collect hint shown until cashOnce
   player: { x: 420, y: 540, vx: 0, vy: 0, flip: false, walkPhase: 0, moving: false,
             chopping: false, chopT: 0, blink: 0, lean: 0 },
 };
@@ -306,6 +314,7 @@ function save() {
     localStorage.setItem(SAVE_KEY, JSON.stringify({
       v: 1, name: S.name, coins: S.coins, muted: AU.muted,
       carried: S.carried, un: S.un, paid: S.paid, soldOnce: S.soldOnce, cos: S.cos,
+      counter: S.counter, pile: S.pile, cashOnce: S.cashOnce,
     }));
   } catch (e) {}
   dirty = false;
@@ -319,6 +328,9 @@ function load() {
     S.name = d.name || 'Farmer'; S.coins = d.coins || 0; AU.muted = !!d.muted;
     S.carried = Array.isArray(d.carried) ? d.carried.slice(0, 40) : [];
     Object.assign(S.un, d.un || {}); S.paid = d.paid || {}; S.soldOnce = !!d.soldOnce;
+    if (d.counter && typeof d.counter === 'object')
+      for (const t of ITEM_ORDER) if (d.counter[t] > 0) S.counter[t] = d.counter[t] | 0;
+    S.pile = Math.max(0, d.pile | 0); S.cashOnce = !!d.cashOnce;
     if (d.cos) {
       S.cos.dress = d.cos.dress | 0; S.cos.cat = d.cos.cat | 0;
       if (Array.isArray(d.cos.ownDress) && d.cos.ownDress.length) S.cos.ownDress = d.cos.ownDress;
@@ -337,6 +349,7 @@ const trees = [], plots = [], bushes = [], chickens = [], cows = [], sheeps = []
 const drops = [], flyers = [], floaters = [], parts = [], coinParts = [];
 let ambientChirpT = rand(4, 9), fullHintT = 0, saveT = 0;
 let dayT = 0.15;   // time of day, 0..1 (starts mid-morning); cosmetic only
+const customers = [];   // market shoppers (transient, not saved)
 const cat = { x: 360, y: 560, flip: false, walkPhase: 0, moving: false, sit: 1, tail: 0, blink: 0, meowT: rand(5, 10) };
 const fishing = { active: false, t: 0, wait: 0, biting: false, biteT: 0, bx: 0, by: 0 };
 
@@ -374,6 +387,31 @@ function buildWorld() {
   if (S.un.chick4) addChicken();
   if (S.un.cowpen) { addCow(); addCow(); }
   if (S.un.sheep) { addSheep(); addSheep(); }
+}
+
+const CUST_SHIRTS = ['#4d96ff', '#ff9f45', '#3fbf6a', '#b36bf0', '#ff5d7a', '#1fb5a8', '#f2c230'];
+const CUST_HAIR   = ['#3b2a1a', '#e0b04a', '#8a4a1e', '#1f1f1f', '#c0502a', '#9a9a9a'];
+const CUST_SKIN   = ['#ffd9b8', '#f1c29a', '#c68c5f', '#8d5a3b'];
+const CUST_PANTS  = ['#3b5b8c', '#5a4632', '#2f3e52', '#7a3b52'];
+function addCustomer() {
+  customers.push({ x: CUSTOMER_GATE.x, y: CUSTOMER_GATE.y, slot: -1, leaving: false, alpha: 0,
+    want: null, need: 2 + Math.floor(Math.random() * 3), got: 0, takeT: 0, happyT: 0,
+    flip: true, walkPhase: 0, moving: false,
+    shirt: pick(CUST_SHIRTS), hair: pick(CUST_HAIR), skin: pick(CUST_SKIN), pants: pick(CUST_PANTS),
+    style: Math.floor(Math.random() * 3) });   // 0 short hair, 1 long hair, 2 cap
+}
+// Where each item type's tower stands on the counter (up to 4 types, most plentiful first,
+// then in a stable left-to-right order so towers don't jump around).
+function counterSlots() {
+  const types = ITEM_ORDER.filter(t => S.counter[t] > 0)
+    .sort((a, b) => S.counter[b] - S.counter[a]).slice(0, 4)
+    .sort((a, b) => ITEM_ORDER.indexOf(a) - ITEM_ORDER.indexOf(b));
+  return types.map((t, i) => ({ type: t, n: S.counter[t], x: SELL_STAND.x - 46 + i * 24, y: SELL_STAND.y - 30 }));
+}
+function bestCounterType() {
+  let best = null;
+  for (const t of ITEM_ORDER) if (S.counter[t] > 0 && (!best || S.counter[t] > S.counter[best])) best = t;
+  return best;
 }
 
 function walkableRects() {
@@ -764,18 +802,21 @@ function update(dt) {
         if (S.carried.length < cap()) S.carried.push(f.type);
         dirty = true;
       }
-    } else { // sell
+    } else if (f.mode === 'sell') {   // basket → market counter
       const t = Math.min(f.t, 1);
-      f.x = lerp(f.sx, SELL_STAND.x, t); f.y = lerp(f.sy, SELL_STAND.y - 25, t) - Math.sin(t * Math.PI) * 60;
+      f.x = lerp(f.sx, SELL_STAND.x - 10, t); f.y = lerp(f.sy, SELL_STAND.y - 40, t) - Math.sin(t * Math.PI) * 60;
       if (f.t >= 1) {
         flyers.splice(i, 1);
-        const val = PRICES[f.type] || 1;
-        S.coins += val; dirty = true;
+        S.counter[f.type] = (S.counter[f.type] || 0) + 1; dirty = true;
         S.soldOnce = true;
-        floater(SELL_STAND.x + rand(-14, 14), SELL_STAND.y - 60, '+' + val, '#ffd93d', 21);
-        puff(SELL_STAND.x, SELL_STAND.y - 30, '#ffe9a0', 3);
-        if (time - lastCoinSnd > 0.09) { AU.coin(); lastCoinSnd = time; }
-        bumpCoins();
+        puff(SELL_STAND.x - 10, SELL_STAND.y - 40, '#fff4d0', 2);
+      }
+    } else {   // 'buy' (counter → customer) and 'cash' (customer → money tile): purely visual
+      const t = clamp(f.t, 0, 1);
+      f.x = lerp(f.sx, f.tx, t); f.y = lerp(f.sy, f.ty, t) - Math.sin(t * Math.PI) * (f.mode === 'cash' ? 70 : 30);
+      if (f.t >= 1) {
+        flyers.splice(i, 1);
+        if (f.mode === 'cash') puff(f.tx, f.ty, '#bff0b0', 3);
       }
     }
   }
@@ -790,6 +831,28 @@ function update(dt) {
       flyers.push({ type, mode: 'sell', t: 0, sx: P.x, sy: P.y - 40, x: P.x, y: P.y - 40 });
     }
   } else sellT = 0;
+
+  /* --- market customers --- */
+  updateCustomers(dt);
+
+  /* --- collect cash from the money tile --- */
+  if (started && S.pile > 0 && dist(P.x, P.y, CASH_ZONE.x, CASH_ZONE.y) < CASH_ZONE.r + 6) {
+    cashT += dt;
+    if (cashT >= 0.05) {
+      cashT = 0;
+      const chunk = Math.max(1, Math.ceil(S.pile / 8));
+      S.pile -= chunk; S.coins += chunk; cashGain += chunk;
+      S.cashOnce = true; dirty = true;
+      coinParts.push({ sx: CASH_ZONE.x + rand(-12, 12), sy: CASH_ZONE.y - 10, x: CASH_ZONE.x, y: CASH_ZONE.y,
+                       tx: P.x, ty: P.y - 50, t: 0 });
+      if (time - lastCoinSnd > 0.08) { AU.coin(); lastCoinSnd = time; }
+      bumpCoins();
+      if (S.pile <= 0) { floater(P.x, P.y - 80, '+' + cashGain, '#b8ff8a', 24); cashGain = 0; save(); }
+    }
+  } else {
+    cashT = 0;
+    if (cashGain > 0) { floater(P.x, P.y - 80, '+' + cashGain, '#b8ff8a', 24); cashGain = 0; }
+  }
 
   /* --- fishing at the dock --- */
   if (started && !P.moving && dist(P.x, P.y, FISH_SPOT.x, FISH_SPOT.y) < 46) {
@@ -870,7 +933,55 @@ function update(dt) {
 
   refreshHud();
 }
-let sellT = 0, payT = 0, payTick = 0, lastCoinSnd = 0;
+let sellT = 0, payT = 0, payTick = 0, lastCoinSnd = 0, cashT = 0, cashGain = 0, custSpawnT = 0;
+
+function updateCustomers(dt) {
+  const queue = customers.filter(c => !c.leaving);
+  custSpawnT -= dt;
+  if (queue.length < QUEUE_POS.length && custSpawnT <= 0) {
+    custSpawnT = rand(0.9, 1.8);
+    addCustomer(); queue.push(customers[customers.length - 1]);
+    puff(CUSTOMER_GATE.x, CUSTOMER_GATE.y - 20, '#ffffff', 5);
+  }
+  queue.forEach((c, i) => { c.slot = i; });   // shuffle forward as the front one leaves
+  for (let i = customers.length - 1; i >= 0; i--) {
+    const c = customers[i];
+    const tgt = c.leaving ? CUSTOMER_GATE : QUEUE_POS[c.slot];
+    const dx = tgt.x - c.x, dy = tgt.y - c.y, d = Math.hypot(dx, dy);
+    c.moving = d > 3;
+    if (c.moving) {
+      const sp = Math.min(d * 5, 95);
+      c.x += dx / d * sp * dt; c.y += dy / d * sp * dt;
+      if (Math.abs(dx) > 2) c.flip = dx < 0;
+      c.walkPhase += dt * 11;
+    } else { c.walkPhase = 0; if (!c.leaving) c.flip = true; }   // face the counter
+    if (c.happyT > 0) c.happyT -= dt;
+    if (c.leaving) {
+      c.alpha = Math.min(c.alpha, clamp(d / 30, 0, 1));
+      if (d < 4) { puff(c.x, c.y - 20, '#ffffff', 5); customers.splice(i, 1); }
+      continue;
+    }
+    c.alpha = Math.min(1, c.alpha + dt * 3);
+    if (!c.moving && !c.want) c.want = bestCounterType() || pick(['wheat', 'wood', 'egg']);
+    if (c.slot !== 0 || c.moving) continue;
+    // front of the queue: buy what's on the counter (switch wants if theirs ran out)
+    if (!(S.counter[c.want] > 0)) c.want = bestCounterType() || c.want || pick(['wheat', 'wood', 'egg']);
+    c.takeT += dt;
+    if (c.takeT >= 0.24 && S.counter[c.want] > 0) {
+      c.takeT = 0;
+      const slot = counterSlots().find(s => s.type === c.want);
+      const sx = slot ? slot.x : SELL_STAND.x, sy = slot ? slot.y - 10 : SELL_STAND.y - 40;
+      if (--S.counter[c.want] <= 0) delete S.counter[c.want];
+      const val = PRICES[c.want] || 1;
+      S.pile += val; c.got++; dirty = true;
+      flyers.push({ type: c.want, mode: 'buy', t: 0, sx, sy, x: sx, y: sy, tx: c.x, ty: c.y - 34 });
+      flyers.push({ type: 'cash', mode: 'cash', t: -0.4, sx: c.x, sy: c.y - 34, x: c.x, y: c.y - 34,
+                    tx: CASH_ZONE.x + rand(-14, 14), ty: CASH_ZONE.y - 6 });
+      AU.pop(rand(1.1, 1.3));
+      if (c.got >= c.need) { c.leaving = true; c.happyT = 1.6; AU.tick(); }
+    }
+  }
+}
 
 function unlock(z) {
   S.un[z.id] = 1; dirty = true;
@@ -1518,7 +1629,125 @@ function drawCoop() {
   ctx.beginPath(); ctx.moveTo(-14, -24); ctx.lineTo(14, 6); ctx.moveTo(14, -24); ctx.lineTo(-14, 6); ctx.stroke();
   ctx.restore();
 }
-function drawCounterTowers() {}
+// items waiting for customers, stacked in little towers on the counter
+// (called from drawStand, which has already translated to SELL_STAND)
+function drawCounterTowers() {
+  for (const sl of counterSlots()) {
+    const lx = sl.x - SELL_STAND.x, ly = sl.y - SELL_STAND.y;
+    const show = Math.min(sl.n, 10);
+    for (let i = 0; i < show; i++) {
+      const col = i % 2, row = i >> 1;
+      drawItem(sl.type, lx - 5 + col * 10 + (row % 2) * 1.5, ly - 4 - row * 7, 0.7, sl.type === 'wood' ? 0 : (col - 0.5) * 0.15);
+    }
+    if (sl.n > 1) outlineText('×' + sl.n, lx, -3, 10, '#fff');
+  }
+}
+function drawCustomer(c) {
+  if (c.alpha <= 0.01) return;
+  ctx.save(); ctx.globalAlpha = c.alpha;
+  shadow(c.x, c.y + 2, 16, 5.5);
+  const bob = c.moving ? Math.abs(Math.sin(c.walkPhase)) * 2.5 : 0;
+  ctx.translate(c.x, c.y - bob); ctx.scale(c.flip ? -1.05 : 1.05, 1.05);
+  const legP = c.moving ? Math.sin(c.walkPhase) : 0;
+  const skinL = shade(c.skin, 0.2), skinD = shade(c.skin, -0.12);
+  // legs + shoes
+  for (const s of [-1, 1]) {
+    ctx.save(); ctx.translate(s * 4.5, -16); ctx.rotate(legP * 0.5 * s);
+    ctx.fillStyle = s < 0 ? shade(c.pants, -0.15) : c.pants; rr(-3.2, 0, 6.4, 13, 2.5); ctx.fill();
+    ctx.fillStyle = '#3a2a20'; rr(-3.6, 11, 7.6, 5, 2.4); ctx.fill();
+    ctx.restore();
+  }
+  // back arm
+  const sw = c.moving ? Math.sin(c.walkPhase + Math.PI) * 0.45 : 0.15;
+  ctx.save(); ctx.translate(-8, -35); ctx.rotate(0.35 + sw);
+  ctx.fillStyle = skinD; rr(-2.5, 0, 5, 14, 2.5); ctx.fill();
+  ctx.fillStyle = shade(c.shirt, -0.25); rr(-3.3, -1, 6.6, 7, 3); ctx.fill();
+  ctx.restore();
+  // torso (t-shirt, lit from the left)
+  rr(-10.5, -39, 21, 26, 8); ctx.fillStyle = hgrad(-10, 10, shade(c.shirt, 0.25), shade(c.shirt, -0.2)); ctx.fill();
+  ctx.fillStyle = 'rgba(255,255,255,0.25)'; rr(-7, -36, 4, 18, 2); ctx.fill();
+  // front arm (reaching toward the counter while shopping)
+  const reach = !c.leaving && c.slot === 0 && !c.moving ? -1.1 : -0.35 - sw;
+  ctx.save(); ctx.translate(8, -35); ctx.rotate(reach);
+  ctx.fillStyle = c.skin; rr(-2.5, 0, 5, 14, 2.5); ctx.fill();
+  ctx.fillStyle = shade(c.shirt, 0.1); rr(-3.3, -1, 6.6, 7, 3); ctx.fill();
+  ctx.restore();
+  // head
+  ctx.save(); ctx.translate(0, -49);
+  if (c.style === 1) {   // long hair falls behind the head
+    ctx.fillStyle = c.hair; rr(-11.5, -4, 17, 20, 7); ctx.fill();
+  }
+  ctx.beginPath(); ctx.arc(0, 0, 10.5, 0, TAU); ctx.fillStyle = rgrad(0, 0, 10.5, skinL, skinD); ctx.fill();
+  if (c.style === 2) {   // baseball cap
+    ctx.fillStyle = shade(c.shirt, -0.3);
+    ctx.beginPath(); ctx.arc(0, -2, 10.8, Math.PI, 0); ctx.fill();
+    ctx.beginPath(); ctx.ellipse(8, -2.5, 8, 2.6, 0.1, 0, TAU); ctx.fill();
+    ctx.fillStyle = 'rgba(255,255,255,0.3)'; ctx.beginPath(); ctx.ellipse(-3, -8, 4, 2, -0.3, 0, TAU); ctx.fill();
+  } else {
+    ctx.fillStyle = c.hair;
+    ctx.beginPath(); ctx.arc(0, -1.5, 10.8, Math.PI * 1.02, Math.PI * 1.98);
+    ctx.quadraticCurveTo(8, -7, 2, -6); ctx.quadraticCurveTo(-6, -5, -11, 2); ctx.closePath(); ctx.fill();
+    ctx.fillStyle = 'rgba(255,255,255,0.22)'; ctx.beginPath(); ctx.ellipse(-3, -8, 4, 1.8, -0.3, 0, TAU); ctx.fill();
+  }
+  for (const ex of [3, 8.4]) {
+    ctx.fillStyle = '#fff'; ctx.beginPath(); ctx.ellipse(ex, 0.8, 1.9, 2.3, 0, 0, TAU); ctx.fill();
+    ctx.fillStyle = '#2d1e12'; ctx.beginPath(); ctx.ellipse(ex + 0.4, 1.1, 1.3, 1.7, 0, 0, TAU); ctx.fill();
+  }
+  ctx.strokeStyle = '#a0412e'; ctx.lineWidth = 1.4; ctx.lineCap = 'round';
+  ctx.beginPath(); ctx.arc(6, 4, c.happyT > 0 ? 3 : 2.2, 0.25, Math.PI - 0.25); ctx.stroke();
+  ctx.fillStyle = 'rgba(240,120,110,0.35)';
+  ctx.beginPath(); ctx.ellipse(0.5, 4.5, 2, 1.3, 0, 0, TAU); ctx.fill();
+  ctx.restore();
+  ctx.restore();
+}
+// thought bubble: what they'd like to buy (and how many), or a happy face on the way home
+function drawCustomerBubble(c) {
+  if (c.alpha < 0.4) return;
+  const happy = c.leaving && c.happyT > 0;
+  if (!happy && (c.leaving || c.moving || !c.want || c.slot !== 0)) return;   // only the one being served
+  const bx = c.x - (happy ? 4 : 22), by = c.y - 92;
+  ctx.save(); ctx.globalAlpha = c.alpha;
+  ctx.translate(bx, by);
+  const w = happy ? 36 : 58, h = 34;
+  rr(-w / 2, -h / 2 + 3, w, h, 15); ctx.fillStyle = 'rgba(30,40,60,0.18)'; ctx.fill();
+  ctx.fillStyle = '#ffffff';
+  rr(-w / 2, -h / 2, w, h, 15); ctx.fill();
+  const tx = happy ? 2 : 14;   // tail dots lead down to the customer's head
+  ctx.beginPath(); ctx.arc(tx, h / 2 + 4, 4.2, 0, TAU); ctx.fill();
+  ctx.beginPath(); ctx.arc(tx + 4, h / 2 + 11, 2.6, 0, TAU); ctx.fill();
+  if (happy) {
+    ctx.font = '20px ' + FONT; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillText('😊', 0, 1);
+  } else {
+    drawItem(c.want, -12, 0, 1.05);
+    ctx.font = 'bold 15px ' + FONT; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillStyle = '#4a3a2a'; ctx.fillText('×' + (c.need - c.got), 13, 1);
+  }
+  ctx.restore();
+}
+// signpost where customers stroll in from town
+function drawGate() {
+  const x = CUSTOMER_GATE.x + 12, y = CUSTOMER_GATE.y - 16;
+  shadow(x, y + 2, 10, 3.5);
+  rr(x - 3, y - 34, 6, 36, 2); ctx.fillStyle = hgrad(x - 3, x + 3, '#c07f43', '#74421b'); ctx.fill();
+  const board = o => {
+    ctx.beginPath(); ctx.moveTo(x - 20, y - 42 + o); ctx.lineTo(x + 12, y - 42 + o); ctx.lineTo(x + 20, y - 34 + o);
+    ctx.lineTo(x + 12, y - 26 + o); ctx.lineTo(x - 20, y - 26 + o); ctx.closePath();
+  };
+  board(2); ctx.fillStyle = '#74421b'; ctx.fill();
+  board(0); ctx.fillStyle = vgrad(y - 42, y - 26, '#e0a868', '#b0703a'); ctx.fill();
+  ctx.font = '11px ' + FONT; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.fillText('🏘️', x - 3, y - 36);
+}
+function billArt() {
+  rr(-12, -7, 24, 14, 2.5); ctx.fillStyle = vgrad(-7, 7, '#a3ee8e', '#3aa047'); ctx.fill();
+  ctx.strokeStyle = '#237a30'; ctx.lineWidth = 1.2; ctx.stroke();
+  rr(-9, -4.6, 18, 9.2, 2); ctx.strokeStyle = 'rgba(255,255,255,0.55)'; ctx.lineWidth = 0.9; ctx.stroke();
+  ctx.beginPath(); ctx.arc(0, 0, 3.6, 0, TAU); ctx.fillStyle = '#dcf8cc'; ctx.fill();
+  ctx.font = 'bold 6px ' + FONT; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.fillStyle = '#237a30'; ctx.fillText('$', 0, 0.4);
+}
+function drawBill(x, y, s, rot) { blit(sprite('bill', 30, 20, billArt), x, y, 30, 20, s, rot); }
 /* fence pieces (built as y-sorted drawables) */
 function fencePieces(pen, gate) {
   const pieces = [];
@@ -1953,66 +2182,78 @@ function drawSky(night) {
   }
   ctx.restore();
 }
+// Township-style ground tile in ¾ perspective with a cyan border (dashed = "stand here")
+function zoneTile(x, y, r, fill, dashed) {
+  const w = r * 2, h = r * 1.3, rad = Math.min(18, r * 0.42);
+  rr(x - w / 2, y - h / 2 + 3, w, h, rad); ctx.fillStyle = 'rgba(10,40,20,0.18)'; ctx.fill();
+  rr(x - w / 2, y - h / 2, w, h, rad); ctx.fillStyle = fill; ctx.fill();
+  ctx.lineWidth = 4; ctx.strokeStyle = '#46e8ff';
+  if (dashed) { ctx.setLineDash([13, 9]); ctx.lineDashOffset = -time * 24; }
+  ctx.stroke(); ctx.setLineDash([]);
+}
 function drawSellZone() {
   const z = SELL_ZONE;
   const pulse = (Math.sin(time * 3) + 1) / 2;
   ctx.save();
-  ctx.beginPath(); ctx.ellipse(z.x, z.y, z.r, z.r * 0.62, 0, 0, TAU);
-  ctx.fillStyle = 'rgba(255,235,160,0.5)'; ctx.fill();
-  ctx.setLineDash([12, 9]);
-  ctx.lineDashOffset = -time * 30;
-  ctx.strokeStyle = 'rgba(240,170,40,0.9)'; ctx.lineWidth = 4;
-  ctx.beginPath(); ctx.ellipse(z.x, z.y, z.r + pulse * 3, (z.r + pulse * 3) * 0.62, 0, 0, TAU); ctx.stroke();
-  ctx.setLineDash([]);
-  // coin symbol
-  ctx.beginPath(); ctx.arc(z.x, z.y, 13, 0, TAU);
-  ctx.fillStyle = '#ffc93c'; ctx.fill();
-  ctx.strokeStyle = '#d68f10'; ctx.lineWidth = 2.5; ctx.stroke();
-  outlineText('$', z.x, z.y + 1, 15, '#a06a10', 'rgba(0,0,0,0)');
+  zoneTile(z.x, z.y, z.r, 'rgba(90,235,255,' + (0.12 + pulse * 0.1).toFixed(3) + ')', true);
+  drawIcon('basket', z.x, z.y - 2 - pulse * 2, 1.05);
   ctx.restore();
+}
+function drawCashTile() {
+  const z = CASH_ZONE;
+  ctx.save();
+  zoneTile(z.x, z.y, z.r, 'rgba(48,60,72,0.85)', false);
+  if (S.pile <= 0) { ctx.globalAlpha = 0.35; drawBill(z.x, z.y, 1.3); }
+  ctx.restore();
+}
+// bundles of cash stacked on the money tile — the more you've earned, the taller
+function drawCashStacks() {
+  const z = CASH_ZONE;
+  const n = Math.min(Math.ceil(S.pile / 8), 28);
+  const spots = [[-13, -6], [13, -6], [-13, 6], [13, 6]];
+  let top = z.y;
+  for (let i = 0; i < n; i++) {
+    const layer = Math.floor(i / 4), sp = spots[i % 4];
+    const bx = z.x + sp[0], by = z.y + sp[1] - layer * 5;
+    ctx.fillStyle = '#1f6a2a'; rr(bx - 12, by, 24, 5.5, 2); ctx.fill();
+    ctx.fillStyle = 'rgba(255,255,255,0.35)'; ctx.fillRect(bx - 10, by + 2, 20, 1);
+    drawBill(bx, by, 1);
+    top = Math.min(top, by);
+  }
+  if (S.pile > 0 && !S.cashOnce) hintArrow(z.x, top - 44);
 }
 function drawBuyZone(z) {
   const paid = S.paid[z.id] || 0;
-  const remaining = z.cost - paid;
-  const pulse = (Math.sin(time * 3 + z.x) + 1) / 2;
+  const w = z.r * 2, h = z.r * 1.3;
   ctx.save();
-  ctx.beginPath(); ctx.ellipse(z.x, z.y, z.r, z.r * 0.62, 0, 0, TAU);
-  ctx.fillStyle = 'rgba(255,255,255,0.75)'; ctx.fill();
-  ctx.strokeStyle = 'rgba(255,255,255,0.9)'; ctx.lineWidth = 3;
-  ctx.beginPath(); ctx.ellipse(z.x, z.y, z.r + 2 + pulse * 3, (z.r + 2 + pulse * 3) * 0.62, 0, 0, TAU); ctx.stroke();
-  // progress arc
-  if (paid > 0) {
-    ctx.strokeStyle = '#5cae2a'; ctx.lineWidth = 6; ctx.lineCap = 'round';
-    ctx.beginPath();
-    ctx.ellipse(z.x, z.y, z.r - 4, (z.r - 4) * 0.62, 0, -Math.PI / 2, -Math.PI / 2 + TAU * (paid / z.cost));
-    ctx.stroke();
+  zoneTile(z.x, z.y, z.r, 'rgba(35,55,70,0.42)', true);
+  if (paid > 0) {   // fills up left → right as it's paid off
+    ctx.save();
+    rr(z.x - w / 2, z.y - h / 2, w, h, Math.min(18, z.r * 0.42)); ctx.clip();
+    ctx.fillStyle = 'rgba(90,245,150,0.55)';
+    ctx.fillRect(z.x - w / 2, z.y - h / 2, w * paid / z.cost, h);
+    ctx.restore();
   }
-  drawIcon(z.icon, z.x, z.y - 4, 1.15);
+  drawIcon(z.icon, z.x, z.y - 3, 1.15);
   ctx.restore();
 }
 function drawBuyZoneLabel(z) {
-  const paid = S.paid[z.id] || 0;
-  const remaining = z.cost - paid;
+  const remaining = z.cost - (S.paid[z.id] || 0);
   ctx.save();
-  // price pill
-  const py = z.y - z.r * 0.62 - 26;
+  // price pill: dark bar with a green bill, like Township's money counter
+  const py = z.y - z.r * 0.65 - 24;
   const txt = String(remaining);
-  ctx.font = 'bold 16px "Comic Sans MS","Chalkboard SE","Segoe UI",sans-serif';
-  const tw = ctx.measureText(txt).width;
-  const pw = tw + 42;
-  rr(z.x - pw / 2, py - 14, pw, 28, 14);
-  ctx.fillStyle = 'rgba(255,255,255,0.95)'; ctx.fill();
-  ctx.strokeStyle = '#ffc93c'; ctx.lineWidth = 2.5; ctx.stroke();
-  // coin
-  ctx.beginPath(); ctx.arc(z.x - pw / 2 + 15, py, 8.5, 0, TAU);
-  ctx.fillStyle = '#ffc93c'; ctx.fill();
-  ctx.strokeStyle = '#d68f10'; ctx.lineWidth = 2; ctx.stroke();
-  ctx.fillStyle = '#6b4a1e'; ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
-  ctx.fillText(txt, z.x - pw / 2 + 28, py + 1);
-  // label
-  outlineText(z.label, z.x, z.y + z.r * 0.62 + 16, 14, '#fff');
+  ctx.font = 'bold 16px ' + FONT;
+  const pw = ctx.measureText(txt).width + 46;
+  rr(z.x - pw / 2, py - 13, pw, 26, 13); ctx.fillStyle = 'rgba(22,32,44,0.82)'; ctx.fill();
+  ctx.strokeStyle = 'rgba(255,255,255,0.85)'; ctx.lineWidth = 2; ctx.stroke();
+  drawBill(z.x - pw / 2 + 17, py, 0.85, -0.12);
+  ctx.fillStyle = '#ffffff'; ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
+  ctx.fillText(txt, z.x - pw / 2 + 32, py + 1);
+  outlineText(z.label, z.x, z.y + z.r * 0.65 + 15, 14, '#fff');
   ctx.restore();
 }
+
 function drawDrop(d) {
   const bob = Math.sin(time * 3 + d.bob) * 3;
   shadow(d.x, d.y + 6, 9, 3.5);
@@ -2086,6 +2327,7 @@ function render() {
   drawBridgeDeck(); drawGhostBridge();
   for (const pl of plots) drawPlot(pl);
   drawSellZone();
+  drawCashTile();
   const visZones = ZONES.filter(z => !S.un[z.id] && z.vis(S.un) &&
     !(z.id === 'chick4' && !S.un.chick3) && !(z.id === 'chick3' && false));
   // hide chick4 until chick3 done, and don't show both at once
@@ -2108,18 +2350,22 @@ function render() {
   if (S.un.sheep) { if (!sheepFence.length) sheepFence = fencePieces(SHEEP_PEN, { side: 'bottom', at: SHEEP_PEN.x + SHEEP_PEN.w / 2, w: 80 }); for (const f of sheepFence) drawables.push(f); }
   drawables.push({ y: S.player.y, draw: drawPlayer });
   drawables.push({ y: cat.y, draw: () => drawCat(cat) });
+  for (const c of customers) drawables.push({ y: c.y, draw: () => drawCustomer(c) });
+  drawables.push({ y: CUSTOMER_GATE.y - 14, draw: drawGate });
+  drawables.push({ y: CASH_ZONE.y + 8, draw: drawCashStacks });
   drawables.sort((a, b) => a.y - b.y);
   for (const d of drawables) d.draw();
   drawFishing();
+  for (const c of customers) drawCustomerBubble(c);
 
   // flyers above everything
-  for (const f of flyers) drawItem(f.type, f.x, f.y, 1.1, f.t * 4);
-  // coin particles
-  for (const c of coinParts) {
-    ctx.beginPath(); ctx.arc(c.x, c.y, 6.5, 0, TAU);
-    ctx.fillStyle = '#ffc93c'; ctx.fill();
-    ctx.strokeStyle = '#d68f10'; ctx.lineWidth = 2; ctx.stroke();
+  for (const f of flyers) {
+    if (f.t < 0) continue;
+    if (f.type === 'cash') drawBill(f.x, f.y, 1, Math.sin(f.t * 9) * 0.4);
+    else drawItem(f.type, f.x, f.y, f.mode === 'buy' ? 0.9 : 1.1, f.t * 4);
   }
+  // cash particles (paying into upgrades / scooping up the money tile)
+  for (const c of coinParts) drawBill(c.x, c.y, 0.9, Math.sin(c.t * 8) * 0.5);
   // particles
   for (const p of parts) {
     ctx.save();
@@ -2158,6 +2404,7 @@ function render() {
       { x: SELL_STAND.x, y: SELL_STAND.y - 42, r: 150 },
       { x: 178, y: 232, r: 130 },
       { x: S.player.x, y: S.player.y - 22, r: 120 },
+      { x: CASH_ZONE.x, y: CASH_ZONE.y - 10, r: 90 },
     ];
     if (S.un.cowpen) lamps.push({ x: COW_PEN.x + COW_PEN.w / 2, y: COW_PEN.y + COW_PEN.h / 2, r: 130 });
     for (const L of lamps) {
